@@ -4,91 +4,117 @@ import requests
 from datetime import datetime
 import plotly.express as px
 import numpy as np
-import io
+from io import BytesIO
 import re
 
-# Page config (unified)
-st.set_page_config(page_title="Rotex Forex & Trade Analyzer", page_icon="📈", layout="wide")
+st.set_page_config(
+    page_title="Rotex Trade Suite",
+    page_icon="📈",
+    layout="wide"
+)
 
-# Initialize session state for IP history
-if 'ip_history' not in st.session_state:
+# ---------- Session State ----------
+if "ip_history" not in st.session_state:
     st.session_state.ip_history = []
-if 'extracted_account_id' not in st.session_state:
-    st.session_state.extracted_account_id = 'N/A'
+if "extracted_account_id" not in st.session_state:
+    st.session_state.extracted_account_id = "N/A"
 
-# --- FULL ISO 3166-1 ALPHA-2 COUNTRY CODE MAPPING ---
-COUNTRY_CODE_MAP = {
-    'AD': 'Andorra', 'AE': 'United Arab Emirates', 'AF': 'Afghanistan', 'AG': 'Antigua and Barbuda',
-    'AI': 'Anguilla', 'AL': 'Albania', 'AM': 'Armenia', 'AO': 'Angola', 'AQ': 'Antarctica',
-    'AR': 'Argentina', 'AS': 'American Samoa', 'AT': 'Austria', 'AU': 'Australia', 'AW': 'Aruba',
-    'AX': 'Åland Islands', 'AZ': 'Azerbaijan', 'BA': 'Bosnia and Herzegovina', 'BB': 'Barbados',
-    'BD': 'Bangladesh', 'BE': 'Belgium', 'BF': 'Burkina Faso', 'BG': 'Bulgaria', 'BH': 'Bahrain',
-    'BI': 'Burundi', 'BJ': 'Benin', 'BL': 'Saint Barthélemy', 'BM': 'Bermuda', 'BN': 'Brunei',
-    'BO': 'Bolivia', 'BQ': 'Caribbean Netherlands', 'BR': 'Brazil', 'BS': 'The Bahamas', 'BT': 'Bhutan',
-    'BV': 'Bouvet Island', 'BW': 'Botswana', 'BY': 'Belarus', 'BZ': 'Belize', 'CA': 'Canada',
-    'CC': 'Cocos (Keeling) Islands', 'CD': 'Democratic Republic of the Congo', 'CF': 'Central African Republic',
-    'CG': 'Republic of the Congo', 'CH': 'Switzerland', 'CI': 'Ivory Coast', 'CK': 'Cook Islands',
-    'CL': 'Chile', 'CM': 'Cameroon', 'CN': 'China', 'CO': 'Colombia', 'CR': 'Costa Rica',
-    'CU': 'Cuba', 'CV': 'Cape Verde', 'CW': 'Curaçao', 'CX': 'Christmas Island', 'CY': 'Cyprus',
-    'CZ': 'Czech Republic', 'DE': 'Germany', 'DJ': 'Djibouti', 'DK': 'Denmark', 'DM': 'Dominica',
-    'DO': 'Dominican Republic', 'DZ': 'Algeria', 'EC': 'Ecuador', 'EE': 'Estonia', 'EG': 'Egypt',
-    'EH': 'Western Sahara', 'ER': 'Eritrea', 'ES': 'Spain', 'ET': 'Ethiopia', 'FI': 'Finland',
-    'FJ': 'Fiji', 'FK': 'Falkland Islands', 'FM': 'Micronesia', 'FO': 'Faroe Islands', 'FR': 'France',
-    'GA': 'Gabon', 'GB': 'United Kingdom', 'GD': 'Grenada', 'GE': 'Georgia', 'GF': 'French Guiana',
-    'GG': 'Guernsey', 'GH': 'Ghana', 'GI': 'Gibraltar', 'GL': 'Greenland', 'GM': 'The Gambia',
-    'GN': 'Guinea', 'GP': 'Guadeloupe', 'GQ': 'Equatorial Guinea', 'GR': 'Greece',
-    'GS': 'South Georgia and the South Sandwich Islands',
-    'GT': 'Guatemala', 'GU': 'Guam', 'GW': 'Guinea-Bissau', 'GY': 'Guyana', 'HK': 'Hong Kong',
-    'HM': 'Heard Island and McDonald Islands', 'HN': 'Honduras', 'HR': 'Croatia', 'HT': 'Haiti',
-    'HU': 'Hungary', 'ID': 'Indonesia', 'IE': 'Ireland', 'IL': 'Israel', 'IM': 'Isle of Man',
-    'IN': 'India', 'IO': 'British Indian Ocean Territory', 'IQ': 'Iraq', 'IR': 'Iran', 'IS': 'Iceland',
-    'IT': 'Italy', 'JE': 'Jersey', 'JM': 'Jamaica', 'JO': 'Jordan', 'JP': 'Japan',
-    'KE': 'Kenya', 'KG': 'Kyrgyzstan', 'KH': 'Cambodia', 'KI': 'Kiribati', 'KM': 'Comoros',
-    'KN': 'Saint Kitts and Nevis', 'KP': 'North Korea', 'KR': 'South Korea', 'KW': 'Kuwait', 'KY': 'Cayman Islands',
-    'KZ': 'Kazakhstan', 'LA': 'Laos', 'LB': 'Lebanon', 'LC': 'Saint Lucia', 'LI': 'Liechtenstein',
-    'LK': 'Sri Lanka', 'LR': 'Liberia', 'LS': 'Lesotho', 'LT': 'Lithuania', 'LU': 'Luxembourg',
-    'LV': 'Latvia', 'LY': 'Libya', 'MA': 'Morocco', 'MC': 'Monaco', 'MD': 'Moldova',
-    'ME': 'Montenegro', 'MF': 'Saint-Martin', 'MG': 'Madagascar', 'MH': 'Marshall Islands', 'MK': 'North Macedonia',
-    'ML': 'Mali', 'MM': 'Myanmar', 'MN': 'Mongolia', 'MO': 'Macau', 'MP': 'Northern Mariana Islands',
-    'MQ': 'Martinique', 'MR': 'Mauritania', 'MS': 'Montserrat', 'MT': 'Malta', 'MU': 'Mauritius',
-    'MV': 'Maldives', 'MW': 'Malawi', 'MX': 'Mexico', 'MY': 'Malaysia', 'MZ': 'Mozambique',
-    'NA': 'Namibia', 'NC': 'New Caledonia', 'NE': 'Niger', 'NF': 'Norfolk Island', 'NG': 'Nigeria',
-    'NI': 'Nicaragua', 'NL': 'Kingdom of the Netherlands', 'NO': 'Norway', 'NP': 'Nepal', 'NR': 'Nauru',
-    'NU': 'Niue', 'NZ': 'New Zealand', 'OM': 'Oman', 'PA': 'Panama', 'PE': 'Peru',
-    'PF': 'French Polynesia', 'PG': 'Papua New Guinea', 'PH': 'Philippines', 'PK': 'Pakistan', 'PL': 'Poland',
-    'PM': 'Saint Pierre and Miquelon', 'PN': 'Pitcairn Islands', 'PR': 'Puerto Rico', 'PS': 'State of Palestine',
-    'PT': 'Portugal',
-    'PW': 'Palau', 'PY': 'Paraguay', 'QA': 'Qatar', 'RE': 'Réunion', 'RO': 'Romania',
-    'RS': 'Serbia', 'RU': 'Russia', 'RW': 'Rwanda', 'SA': 'Saudi Arabia', 'SB': 'Solomon Islands',
-    'SC': 'Seychelles', 'SD': 'Sudan', 'SE': 'Sweden', 'SG': 'Singapore',
-    'SH': 'Saint Helena, Ascension and Tristan da Cunha',
-    'SI': 'Slovenia', 'SJ': 'Svalbard and Jan Mayen', 'SK': 'Slovakia', 'SL': 'Sierra Leone', 'SM': 'San Marino',
-    'SN': 'Senegal', 'SO': 'Somalia', 'SR': 'Suriname', 'SS': 'South Sudan', 'ST': 'São Tomé and Príncipe',
-    'SV': 'El Salvador', 'SX': 'Sint Maarten', 'SY': 'Syria', 'SZ': 'Eswatini', 'TC': 'Turks and Caicos Islands',
-    'TD': 'Chad', 'TF': 'French Southern and Antarctic Lands', 'TG': 'Togo', 'TH': 'Thailand', 'TJ': 'Tajikistan',
-    'TK': 'Tokelau', 'TL': 'Timor-Leste', 'TM': 'Turkmenistan', 'TN': 'Tunisia', 'TO': 'Tonga',
-    'TR': 'Turkey', 'TT': 'Trinidad and Tobago', 'TV': 'Tuvalu', 'TW': 'Taiwan', 'TZ': 'Tanzania',
-    'UA': 'Ukraine', 'UG': 'Uganda', 'UM': 'United States Minor Outlying Islands', 'US': 'United States',
-    'UY': 'Uruguay',
-    'UZ': 'Uzbekistan', 'VA': 'Vatican City', 'VC': 'Saint Vincent and the Grenadines', 'VE': 'Venezuela',
-    'VG': 'British Virgin Islands',
-    'VI': 'United States Virgin Islands', 'VN': 'Vietnam', 'VU': 'Vanuatu', 'WF': 'Wallis and Futuna', 'WS': 'Samoa',
-    'YE': 'Yemen', 'YT': 'Mayotte', 'ZA': 'South Africa', 'ZM': 'Zambia', 'ZW': 'Zimbabwe'
+# ---------- Minimal CSS Theme ----------
+THEME_CSS = r"""
+<style>
+html, body { overflow-x: hidden !important; }
+
+/* Simple light background */
+body {
+  background-color: #f5f5f7 !important;
 }
 
+/* Hide default header + sidebar for cleaner layout */
+header[data-testid="stHeader"] { display: none !important; }
+[data-testid="stSidebar"] { display: none !important; }
 
-def get_country_name(code):
-    """Converts a 2-letter country code to its full name."""
-    if not code:
-        return "N/A"
-    code = code.upper().strip()
-    return COUNTRY_CODE_MAP.get(code, code)
+.main .block-container {
+  max-width: 100% !important;
+  padding-left: 2rem !important;
+  padding-right: 2rem !important;
+  padding-top: 1.5rem !important;
+  background: #f5f5f7 !important;
+}
 
+/* Simple, minimal buttons */
+.stButton>button,
+button[data-testid*="baseButton-"],
+div[data-testid*="stDownloadButton"] > button {
+  background: #ffffff !important;
+  color: #111827 !important;
+  border-radius: 6px !important;
+  border: 1px solid #d1d5db !important;
+  font-weight: 500 !important;
+  padding: 0.4rem 1.1rem !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04) !important;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease !important;
+}
+.stButton>button:hover,
+button[data-testid*="baseButton-"]:hover,
+div[data-testid*="stDownloadButton"] > button:hover {
+  background: #f3f4f6 !important;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.06) !important;
+  transform: translateY(-1px) !important;
+}
 
-# --- Other Helper Functions (detect_pip_size, contract_size, etc.) ---
+/* Inputs */
+.stTextInput input,
+.stTextArea textarea,
+.stNumberInput input,
+[data-testid="stFileUploader"] {
+  background: #ffffff !important;
+  border-radius: 6px !important;
+  border: 1px solid #d1d5db !important;
+}
+
+/* Tabs */
+[data-baseweb="tab-list"] {
+  border-bottom: 1px solid #e5e7eb !important;
+}
+button[role="tab"] {
+  border-radius: 6px 6px 0 0 !important;
+}
+button[role="tab"][aria-selected="true"] {
+  background: #ffffff !important;
+  border-bottom: 2px solid #111827 !important;
+}
+
+/* IP cards */
+.ip-card {
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 1rem;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  margin-bottom: 1rem;
+  text-align: left;
+}
+
+/* Logo alignment */
+.logo-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.6rem;
+}
+.logo-row img {
+  max-height: 70px;
+  width: auto;
+  object-fit: contain;
+}
+</style>
+"""
+st.markdown(THEME_CSS, unsafe_allow_html=True)
+
+# ---------- Forex Helpers ----------
 
 @st.cache_data
-def detect_pip_size(pair):
+def detect_pip_size(pair: str) -> float:
     pair = pair.upper()
     metals = ['XAUUSD', 'XAUAUD', 'XPDUSD', 'XAGAUD', 'XAGEUR', 'XAGUSD', 'XAUEUR', 'XPTUSD', 'XALUSD']
     indices = ['AUS200', 'CHINA50', 'ESP35', 'EU50', 'FRA40', 'GER40', 'HK50', 'JPN225', 'UK100', 'US100', 'US30',
@@ -107,400 +133,692 @@ def detect_pip_size(pair):
     return 0.0001
 
 
-def contract_size(lot_type, custom_lot_size):
+def contract_size(lot_type: str, custom_lot_size):
     if lot_type == 'standard':
         return 100000
-    elif lot_type == 'mini':
+    if lot_type == 'mini':
         return 10000
-    elif lot_type == 'micro':
+    if lot_type == 'micro':
         return 1000
-    elif lot_type == 'custom':
+    if lot_type == 'custom':
         try:
             return float(custom_lot_size)
         except (ValueError, TypeError):
             return 0
     return 0
 
+# ---------- Trade Analyzer Core ----------
 
-# --- Trade Analysis Function (File Name Fallback) ---
-def analyze_trades(uploaded_file, file_name=None):
-    """Analyze trading positions from Excel file and extract Account ID, with file name fallback."""
+def parse_datetime_flex(series: pd.Series) -> pd.Series:
+    parsed = pd.to_datetime(series, format='%Y.%m.%d %H:%M:%S.%f', errors='coerce')
+    parsed = parsed.fillna(pd.to_datetime(series, format='%Y.%m.%d %H:%M:%S', errors='coerce'))
+    return parsed
 
+
+def analyze_trades(uploaded_file, scalping_limit: int = 3, file_name: str | None = None) -> dict:
+    """
+    Unified trade analyzer:
+    - Extract Account ID from header or filename
+    - Detect scalping / reversal / burst
+    - Compute equity curve and symbol stats
+    """
     extracted_account_id = None
-
     try:
         df = pd.read_excel(uploaded_file, sheet_name=0, header=None)
 
-        # --- 1. Robust Extract Account ID from File Content ---
+        # --- Try to extract Account from top rows ---
         df_head = df.head(10).fillna('')
-
-        for i in df_head.index:
-            row = df_head.loc[i]
-            for col_index, cell_value in row.items():
-                if isinstance(cell_value, str) and re.search(r'\bAccount:\b', cell_value, re.IGNORECASE):
-                    for val_col in range(col_index + 1, min(col_index + 6, len(row))):
+        for _, row in df_head.iterrows():
+            for col_idx, cell in row.items():
+                if isinstance(cell, str) and re.search(r'\bAccount:\b', cell, re.IGNORECASE):
+                    for val_col in range(col_idx + 1, min(col_idx + 6, len(row))):
                         account_info = str(row.get(val_col, '')).strip()
-
                         if account_info:
-                            match = re.search(r'(\d+)', account_info)
-                            if match:
-                                extracted_account_id = match.group(1)
+                            m = re.search(r'(\d+)', account_info)
+                            if m:
+                                extracted_account_id = m.group(1)
                                 break
-
-                    if extracted_account_id:
-                        break
-
+                    break
             if extracted_account_id:
                 break
 
-                # --- 2. Fallback: Extract Account ID from File Name ---
-        file_name_account_id = None
-        if file_name:
-            match = re.search(r'ReportHistory[-_](\d+)', file_name, re.IGNORECASE)
-            if match:
-                file_name_account_id = match.group(1)
+        # Fallback to filename
+        if not extracted_account_id and file_name:
+            m = re.search(r'ReportHistory[-_ ]?(\d+)', file_name, re.IGNORECASE)
+            if m:
+                extracted_account_id = m.group(1)
 
-        # If content extraction failed, use file name extraction
-        if not extracted_account_id and file_name_account_id:
-            extracted_account_id = file_name_account_id
-
-        # --- 3. Start Trade Position Analysis ---
+        # --- Locate Positions section ---
         start_idx = df.index[df[0].astype(str).str.contains(r'\bPositions\b', case=False, na=False)].tolist()
         end_idx = df.index[df[0].astype(str).str.contains(r'\bOrders\b', case=False, na=False)].tolist()
 
         if not start_idx:
-            # If the positions section can't be found, return a specific error
-            return {"error": "Could not find 'Positions' section in the file. Ensure the structure is correct.",
-                    "extracted_account_id": extracted_account_id}
+            return {
+                "error": "Could not find 'Positions' section in this report.",
+                "extracted_account_id": extracted_account_id
+            }
 
         start = start_idx[0] + 1
         end = end_idx[0] if end_idx else len(df)
+        positions_raw = df.iloc[start:end].dropna(how='all')
 
-        positions_raw = df.iloc[start:end]
-        positions_raw = positions_raw.dropna(how='all')
-        if len(positions_raw) == 0:
-            return {"error": "No data found in Positions section.", "extracted_account_id": extracted_account_id}
+        if positions_raw.empty:
+            return {
+                "error": "No position rows found under 'Positions' section.",
+                "extracted_account_id": extracted_account_id
+            }
 
         header_row = positions_raw.iloc[0]
         positions_df = positions_raw[1:].reset_index(drop=True)
         positions_df.columns = header_row
 
-        positions_df = positions_df.rename(columns={
-            'Time': 'Open Time',
-            'Price': 'Open Price'
-        })
-
+        positions_df = positions_df.rename(columns={"Time": "Open Time", "Price": "Open Price"})
         if 'Close Time' not in positions_df.columns and len(positions_df.columns) > 8:
             positions_df.columns.values[8] = 'Close Time'
         if 'Close Price' not in positions_df.columns and len(positions_df.columns) > 9:
             positions_df.columns.values[9] = 'Close Price'
 
-        def parse_datetime_flex(series):
-            parsed = pd.to_datetime(series, format='%Y.%m.%d %H:%M:%S.%f', errors='coerce')
-            parsed = parsed.fillna(pd.to_datetime(series, format='%Y.%m.%d %H:%M:%S', errors='coerce'))
-            return parsed
-
         positions_df['Open Time'] = parse_datetime_flex(positions_df.get('Open Time'))
         positions_df['Close Time'] = parse_datetime_flex(positions_df.get('Close Time'))
 
         positions_df = positions_df.dropna(subset=['Open Time', 'Close Time'])
-        if len(positions_df) == 0:
-            return {"error": "No valid timestamps found for analysis.", "extracted_account_id": extracted_account_id}
+        if positions_df.empty:
+            return {
+                "error": "Could not parse any valid timestamps from the positions.",
+                "extracted_account_id": extracted_account_id
+            }
 
-        positions_df['Profit'] = pd.to_numeric(positions_df['Profit'], errors='coerce').fillna(0)
+        positions_df['Profit'] = pd.to_numeric(positions_df.get('Profit'), errors='coerce').fillna(0)
+        positions_df['Volume'] = pd.to_numeric(positions_df.get('Volume', 0), errors='coerce').fillna(0)
         positions_df['Hold_Time'] = positions_df['Close Time'] - positions_df['Open Time']
 
-        scalping_df = positions_df[positions_df['Hold_Time'] <= pd.Timedelta(minutes=3)].copy()
+        # --- Scalping ---
+        scalping_df = positions_df[positions_df['Hold_Time'] <= pd.Timedelta(minutes=scalping_limit)].copy()
 
-        positions_df = positions_df.sort_values(by='Open Time').reset_index(drop=True)
+        # Sort by open time for pattern detection and equity
+        positions_df = positions_df.sort_values('Open Time').reset_index(drop=True)
 
+        # --- Reversal (opposite Type within 20s, same Symbol) ---
         positions_df['Reversal'] = False
         for i in range(1, len(positions_df)):
             prev_close = positions_df.loc[i - 1, 'Close Time']
             curr_open = positions_df.loc[i, 'Open Time']
-            prev_type = str(positions_df.loc[i - 1, 'Type']).strip().lower()
-            curr_type = str(positions_df.loc[i, 'Type']).strip().lower()
-            prev_symbol = str(positions_df.loc[i - 1, 'Symbol']).strip().upper()
-            curr_symbol = str(positions_df.loc[i, 'Symbol']).strip().upper()
+            prev_type = str(positions_df.loc[i - 1].get('Type', '')).strip().lower()
+            curr_type = str(positions_df.loc[i].get('Type', '')).strip().lower()
+            prev_symbol = str(positions_df.loc[i - 1].get('Symbol', '')).strip().upper()
+            curr_symbol = str(positions_df.loc[i].get('Symbol', '')).strip().upper()
 
             if pd.notnull(prev_close) and pd.notnull(curr_open) and prev_symbol == curr_symbol:
-                time_diff = abs((curr_open - prev_close).total_seconds())
-                if time_diff <= 20 and (
-                        (prev_type == 'buy' and curr_type == 'sell') or
-                        (prev_type == 'sell' and curr_type == 'buy')
+                dt = (curr_open - prev_close).total_seconds()
+                if dt <= 20 and (
+                    (prev_type == 'buy' and curr_type == 'sell') or
+                    (prev_type == 'sell' and curr_type == 'buy')
                 ):
                     positions_df.loc[i, 'Reversal'] = True
 
         reversal_df = positions_df[positions_df['Reversal']].copy()
 
+        # --- Burst (2+ trades within 2 seconds chain) ---
         positions_df['Burst'] = False
         burst_indices = set()
-
         i = 0
         while i < len(positions_df) - 1:
-            current_burst = []
+            current = []
             j = i
             while j < len(positions_df) - 1:
-                curr_open = positions_df.loc[j, 'Open Time']
-                next_open = positions_df.loc[j + 1, 'Open Time']
-
-                if pd.notnull(curr_open) and pd.notnull(next_open):
-                    time_diff = (next_open - curr_open).total_seconds()
-                    if time_diff <= 2:
-                        if not current_burst:
-                            current_burst.append(j)
-                        current_burst.append(j + 1)
+                t1 = positions_df.loc[j, 'Open Time']
+                t2 = positions_df.loc[j + 1, 'Open Time']
+                if pd.notnull(t1) and pd.notnull(t2):
+                    dt = (t2 - t1).total_seconds()
+                    if dt <= 2:
+                        if not current:
+                            current.append(j)
+                        current.append(j + 1)
                         j += 1
                     else:
                         break
                 else:
                     j += 1
-
-            if len(current_burst) >= 2:
-                burst_indices.update(current_burst)
-                i = current_burst[-1] + 1
+            if len(current) >= 2:
+                burst_indices.update(current)
+                i = current[-1] + 1
             else:
                 i += 1
 
-        positions_df.loc[list(burst_indices), 'Burst'] = True
+        if burst_indices:
+            positions_df.loc[list(burst_indices), 'Burst'] = True
         burst_df = positions_df[positions_df['Burst']].copy()
 
+        # --- Stats ---
         total_positions = len(positions_df)
         total_profit = positions_df['Profit'].sum()
+        total_volume = positions_df['Volume'].sum()
+
         scalping_count = len(scalping_df)
         scalping_profit = scalping_df['Profit'].sum()
+
         reversal_count = len(reversal_df)
         reversal_profit = reversal_df['Profit'].sum()
+
         burst_count = len(burst_df)
         burst_profit = burst_df['Profit'].sum()
 
-        scalping_percentage = (scalping_count / total_positions * 100) if total_positions > 0 else 0
-        reversal_percentage = (reversal_count / total_positions * 100) if total_positions > 0 else 0
-        burst_percentage = (burst_count / total_positions * 100) if total_positions > 0 else 0
+        scalping_percentage = (scalping_count / total_positions * 100) if total_positions else 0
+        reversal_percentage = (reversal_count / total_positions * 100) if total_positions else 0
+        burst_percentage = (burst_count / total_positions * 100) if total_positions else 0
+
+        scalping_profit_pct = (scalping_profit / total_profit * 100) if total_profit else 0
+        reversal_profit_pct = (reversal_profit / total_profit * 100) if total_profit else 0
+        burst_profit_pct = (burst_profit / total_profit * 100) if total_profit else 0
 
         avg_hold_time = positions_df['Hold_Time'].mean()
-        avg_scalping_hold_time = scalping_df['Hold_Time'].mean() if scalping_count > 0 else pd.Timedelta(0)
+        avg_scalp_hold_time = scalping_df['Hold_Time'].mean() if scalping_count else pd.Timedelta(0)
+
+        profit_by_symbol = positions_df.groupby('Symbol')['Profit'].sum() if 'Symbol' in positions_df.columns else pd.Series(dtype=float)
+        trades_count = positions_df['Symbol'].value_counts() if 'Symbol' in positions_df.columns else pd.Series(dtype=int)
+
+        equity_df = positions_df.sort_values('Close Time').copy()
+        equity_df['Cumulative_Profit'] = equity_df['Profit'].cumsum()
 
         return {
+            "error": None,
+            "extracted_account_id": extracted_account_id,
             "total_positions": total_positions,
             "total_profit": total_profit,
+            "total_volume": total_volume,
             "scalping_count": scalping_count,
             "scalping_profit": scalping_profit,
             "scalping_percentage": scalping_percentage,
+            "scalping_profit_percentage": scalping_profit_pct,
             "reversal_count": reversal_count,
             "reversal_profit": reversal_profit,
             "reversal_percentage": reversal_percentage,
+            "reversal_profit_percentage": reversal_profit_pct,
             "burst_count": burst_count,
             "burst_profit": burst_profit,
             "burst_percentage": burst_percentage,
+            "burst_profit_percentage": burst_profit_pct,
             "avg_hold_time": avg_hold_time,
-            "avg_scalping_hold_time": avg_scalping_hold_time,
+            "avg_scalping_hold_time": avg_scalp_hold_time,
             "scalping_df": scalping_df,
             "reversal_df": reversal_df,
             "burst_df": burst_df,
             "all_positions_df": positions_df,
-            "extracted_account_id": extracted_account_id
+            "profit_by_symbol": profit_by_symbol,
+            "trades_count": trades_count,
+            "equity_df": equity_df,
         }
 
     except Exception as e:
-        # If an error occurs during processing, ensure a default structure is returned
-        return {"error": f"Error processing file: {str(e)}", "extracted_account_id": extracted_account_id}
+        return {
+            "error": f"Error while reading file: {e}",
+            "extracted_account_id": extracted_account_id
+        }
 
+# ---------- IP & Security Helpers ----------
 
-# --- IP Lookup Helpers & Report Generation (Unchanged) ---
-def get_ip_details(ip_address):
-    if not ip_address or ip_address.lower() == 'n/a':
+def get_ip_details(ip_address: str) -> dict:
+    if not ip_address or str(ip_address).lower() == "n/a":
         return {"error": "No IP provided."}
     try:
-        response = requests.get(f'https://ipinfo.io/{ip_address}/json', timeout=5)
-        response.raise_for_status()
-
-        data = response.json()
-
-        if 'country' in data:
-            data['full_country'] = get_country_name(data['country'])
-
-        return data
+        resp = requests.get(f"https://ipinfo.io/{ip_address}/json", timeout=5)
+        resp.raise_for_status()
+        return resp.json()
     except requests.exceptions.RequestException as e:
         return {"error": str(e)}
 
 
-def generate_report(analysis_result, account_id, trade_ip_details, account_country, vps_used):
-    total_positions = analysis_result['total_positions']
-    total_profit = analysis_result['total_profit']
-    scalping_count = analysis_result['scalping_count']
-    scalping_profit = analysis_result['scalping_profit']
-    scalping_percentage = analysis_result['scalping_percentage']
+def add_ip_to_history(ip: str, details: dict) -> None:
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    st.session_state.ip_history.insert(0, {"timestamp": timestamp, "ip": ip, "details": details})
+    st.session_state.ip_history = st.session_state.ip_history[:12]
+
+
+def generate_security_report(analysis: dict, account_id: str, trade_ip: dict,
+                             account_country: str, vps_used: str) -> str:
+    total_positions = analysis['total_positions']
+    total_profit = analysis['total_profit']
+    scalping_count = analysis['scalping_count']
+    scalping_pct = analysis['scalping_percentage']
+    scalping_profit = analysis['scalping_profit']
+
+    reversal_count = analysis['reversal_count']
+    burst_count = analysis['burst_count']
 
     is_toxic = False
-    toxic_patterns = []
+    patterns = []
 
-    if scalping_percentage >= 30:
+    if scalping_pct >= 30:
         is_toxic = True
-        toxic_patterns.append("Excessive Scalping (>= 30% of total trades)")
-
-    if analysis_result['reversal_count'] > (total_positions * 0.03):
+        patterns.append("Excessive Scalping (≥ 30% of total trades)")
+    if reversal_count > total_positions * 0.03:
         is_toxic = True
-        toxic_patterns.append("Frequent Reversal Patterns (Hedge-and-Dump)")
-
-    if analysis_result['burst_count'] > (total_positions * 0.03):
+        patterns.append("Frequent Reversal / Hedge-like trading")
+    if burst_count > total_positions * 0.03:
         is_toxic = True
-        toxic_patterns.append("Rapid Burst Trading (HFT-like activity)")
+        patterns.append("Rapid Burst / HFT-like activity")
 
-    if scalping_percentage >= 30:
-        toxic_status = "Toxic trading patterns were found in this account."
-    else:
-        toxic_status = "No toxic trading pattern found in this account."
+    toxic_status = "Toxic trading patterns detected." if is_toxic else "No major toxic trading pattern detected."
 
-    trade_location_country_name = trade_ip_details.get('full_country', trade_ip_details.get('country', 'N/A'))
-    trade_location_text = f"{trade_ip_details.get('city', 'N/A')}, {trade_location_country_name}"
+    city = trade_ip.get('city', 'N/A')
+    country = trade_ip.get('country', 'N/A')
+    trade_location = f"{city}, {country}"
 
     report = f"""Account {account_id}
-Total trades: {total_positions} with an overall profit of ${total_profit:.2f}.
-Scalping trades: {scalping_count} ({scalping_percentage:.1f}%) with a profit of ${scalping_profit:.2f}.
-Trading activity was done in {trade_location_text}, but the account country is registered as {account_country}.
+Total trades: {total_positions} with overall profit of ${total_profit:.2f}.
+Scalping trades: {scalping_count} ({scalping_pct:.1f}%) with profit of ${scalping_profit:.2f}.
+Trading location appears to be {trade_location}, while registered country is {account_country}.
 
 {toxic_status}
 VPS used: {vps_used}.
 """
-    if is_toxic and scalping_percentage >= 30 and len(toxic_patterns) > 1:
-        report += f"Detected patterns: {', '.join(toxic_patterns)}"
+    if is_toxic and patterns:
+        report += "Detected patterns: " + ", ".join(patterns)
 
     return report
 
+# ---------- Layout: Logo + Title ----------
+logo_col1, logo_col2, logo_col3 = st.columns([2, 3, 2])
+with logo_col2:
+    st.markdown('<div class="logo-row">', unsafe_allow_html=True)
+    try:
+        st.image("Rotex.png")
+        st.image("Eagleeye.png")
+    except Exception:
+        st.write("")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# --- Main App with Tabs (Modified only in the analysis result handling) ---
-st.title("📈 Rotex Forex & Trade Analyzer")
+st.title("Rotex EagleEye Trade Analyzer\n Forex Tools • IP Security")
+st.markdown("---")
 
-tab1, tab2 = st.tabs(["💱 Forex Calculator", "📊 Trade & Security Analyzer"])
+# ---------- Tabs ----------
+tab_trade, tab_forex, tab_ip = st.tabs([
+    "📊 Trade Analyzer",
+    "🧮 Forex Calculator",
+    "🌐 IP & Security",
+])
 
-# ===========================================================
-# 🔹 TAB 1: FOREX CALCULATOR (Unchanged)
-# ===========================================================
-with tab1:
-    st.header("ROTEX FOREX CALCULATOR")
+# ---------- TAB 1: Trade Analyzer ----------
+with tab_trade:
+    st.subheader("Trade Analysis")
 
-    col_spacer_left, col_center, col_spacer_right = st.columns([1, 3, 1])
+    upload_col, scalper_col = st.columns([3, 1])
+    with upload_col:
+        trade_file = st.file_uploader(
+            "Upload MT4 / MT5 Trade History (.xlsx)",
+            type=["xlsx"],
+            key="trade_file_analyzer"
+        )
+    with scalper_col:
+        scalping_limit = st.slider("Scalping (minutes)", 1, 5, 3)
 
-    with col_center:
-        calculation_type = st.selectbox(
-            "Select Calculation Type",
-            ['Pip Difference', 'Margin Calculator', 'Pip Value & Spread Cost', 'Swap Calculator'],
-            key="calc_type_select"
+    if trade_file:
+        with st.spinner("Analyzing trade report..."):
+            result = analyze_trades(trade_file, scalping_limit=scalping_limit, file_name=trade_file.name)
+
+        if result.get("error"):
+            st.error(result["error"])
+        else:
+            acc_id = result.get("extracted_account_id") or st.session_state.extracted_account_id or "Unknown"
+            st.session_state.extracted_account_id = acc_id
+
+            st.markdown(f"**Detected Account ID:** `{acc_id}`")
+
+            # --- High-level Metrics ---
+            st.subheader("Overall Statistics")
+            m1, m2, m3, m4 = st.columns(4)
+            with m1:
+                st.metric("Total Trades", result['total_positions'])
+            with m2:
+                st.metric("Total Profit", f"${result['total_profit']:.2f}")
+            with m3:
+                st.metric("Avg Hold Time", str(result['avg_hold_time']).split('.')[0])
+            with m4:
+                ppt = result['total_profit'] / result['total_positions'] if result['total_positions'] else 0
+                st.metric("Profit / Trade", f"${ppt:.2f}")
+
+            st.metric("Total Volume Traded", f"{result['total_volume']:.2f}")
+
+            # --- Scalping metrics ---
+            st.subheader(f"Scalping (≤ {scalping_limit} min)")
+            s1, s2, s3, s4 = st.columns(4)
+            with s1:
+                st.metric("Scalping Trades", result['scalping_count'],
+                          delta=f"{result['scalping_percentage']:.1f}% of total")
+            with s2:
+                st.metric("Scalping Profit", f"${result['scalping_profit']:.2f}",
+                          delta=f"{result['scalping_profit_percentage']:.1f}% of total profit")
+            with s3:
+                if len(result['scalping_df']) > 0:
+                    win_rate = (result['scalping_df']['Profit'] > 0).mean() * 100
+                    st.metric("Scalping Win Rate", f"{win_rate:.1f}%")
+                else:
+                    st.metric("Scalping Win Rate", "N/A")
+            with s4:
+                avg_s = result['avg_scalping_hold_time']
+                st.metric("Avg Scalp Time", str(avg_s).split('.')[0] if result['scalping_count'] else "N/A")
+
+            # Downloads for scalping
+            if result['scalping_count'] > 0:
+                dl1, dl2 = st.columns(2)
+                with dl1:
+                    csv_data = result['scalping_df'].to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        "Scalping Trades (CSV)",
+                        data=csv_data,
+                        file_name=f"scalping_trades_{acc_id}.csv",
+                        mime="text/csv",
+                    )
+                with dl2:
+                    buf = BytesIO()
+                    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+                        result['scalping_df'].to_excel(writer, index=False, sheet_name="Scalping")
+                    buf.seek(0)
+                    st.download_button(
+                        "Scalping Trades (Excel)",
+                        data=buf,
+                        file_name=f"scalping_trades_{acc_id}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+
+            # --- Reversal metrics ---
+            st.subheader("Reversal Trades (Opposite side within 20s, same symbol)")
+            r1, r2, r3, r4 = st.columns(4)
+            with r1:
+                st.metric("Reversal Trades", result['reversal_count'],
+                          delta=f"{result['reversal_percentage']:.1f}% of total")
+            with r2:
+                st.metric("Reversal Profit", f"${result['reversal_profit']:.2f}",
+                          delta=f"{result['reversal_profit_percentage']:.1f}% of total profit")
+            with r3:
+                if len(result['reversal_df']) > 0:
+                    wr = (result['reversal_df']['Profit'] > 0).mean() * 100
+                    st.metric("Reversal Win Rate", f"{wr:.1f}%")
+                else:
+                    st.metric("Reversal Win Rate", "N/A")
+            with r4:
+                avg_rev_profit = result['reversal_df']['Profit'].mean() if len(result['reversal_df']) > 0 else 0
+                st.metric("Avg Reversal Profit", f"${avg_rev_profit:.2f}" if len(result['reversal_df']) else "N/A")
+
+            if result['reversal_count'] > 0:
+                dl1, dl2 = st.columns(2)
+                with dl1:
+                    csv_data = result['reversal_df'].to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        "Reversal Trades (CSV)",
+                        data=csv_data,
+                        file_name=f"reversal_trades_{acc_id}.csv",
+                        mime="text/csv",
+                    )
+                with dl2:
+                    buf = BytesIO()
+                    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+                        result['reversal_df'].to_excel(writer, index=False, sheet_name="Reversal")
+                    buf.seek(0)
+                    st.download_button(
+                        "Reversal Trades (Excel)",
+                        data=buf,
+                        file_name=f"reversal_trades_{acc_id}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+
+            # --- Burst metrics ---
+            st.subheader("Burst Trades (≥ 2 trades within 2 seconds)")
+            b1, b2, b3, b4 = st.columns(4)
+            with b1:
+                st.metric("Burst Trades", result['burst_count'],
+                          delta=f"{result['burst_percentage']:.1f}% of total")
+            with b2:
+                st.metric("Burst Profit", f"${result['burst_profit']:.2f}",
+                          delta=f"{result['burst_profit_percentage']:.1f}% of total profit")
+            with b3:
+                if len(result['burst_df']) > 0:
+                    wr = (result['burst_df']['Profit'] > 0).mean() * 100
+                    st.metric("Burst Win Rate", f"{wr:.1f}%")
+                else:
+                    st.metric("Burst Win Rate", "N/A")
+            with b4:
+                avg_burst_profit = result['burst_df']['Profit'].mean() if len(result['burst_df']) > 0 else 0
+                st.metric("Avg Burst Profit", f"${avg_burst_profit:.2f}" if len(result['burst_df']) else "N/A")
+
+            if result['burst_count'] > 0:
+                dl1, dl2 = st.columns(2)
+                with dl1:
+                    csv_data = result['burst_df'].to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        "Burst Trades (CSV)",
+                        data=csv_data,
+                        file_name=f"burst_trades_{acc_id}.csv",
+                        mime="text/csv",
+                    )
+                with dl2:
+                    buf = BytesIO()
+                    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+                        result['burst_df'].to_excel(writer, index=False, sheet_name="Burst")
+                    buf.seek(0)
+                    st.download_button(
+                        "Burst Trades (Excel)",
+                        data=buf,
+                        file_name=f"burst_trades_{acc_id}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+
+            # --- Visuals ---
+            st.subheader("Visual Analysis")
+            v1, v2, v3 = st.columns(3)
+
+            with v1:
+                st.markdown("**Trade Type Distribution**")
+                scalp = result['scalping_count']
+                rev = result['reversal_count']
+                burst = result['burst_count']
+                others = result['total_positions'] - (scalp + rev + burst)
+                pie_df = pd.DataFrame({
+                    "Category": ["Scalping", "Reversal", "Burst", "Other"],
+                    "Count": [scalp, rev, burst, max(0, others)],
+                })
+                fig = px.pie(pie_df, names="Category", values="Count")
+                fig.update_traces(textinfo="percent+label", textposition="inside")
+                fig.update_layout(height=320, margin=dict(l=0, r=0, t=40, b=0))
+                st.plotly_chart(fig, use_container_width=True)
+
+            with v2:
+                st.markdown("**Profit / Loss by Symbol**")
+                pbs = result['profit_by_symbol']
+                if not pbs.empty:
+                    colors = ["#10b981" if v >= 0 else "#ef4444" for v in pbs.values]
+                    fig2 = px.bar(
+                        x=pbs.values,
+                        y=pbs.index,
+                        orientation="h",
+                        labels={"x": "Profit / Loss", "y": "Symbol"},
+                    )
+                    fig2.update_traces(marker_color=colors)
+                    st.plotly_chart(fig2, use_container_width=True)
+                else:
+                    st.info("No symbol column available in this report.")
+
+            with v3:
+                st.markdown("**Number of Trades per Symbol**")
+                tc = result['trades_count']
+                if not tc.empty:
+                    pbs = result['profit_by_symbol']
+                    colors = ["#10b981" if pbs.get(sym, 0) >= 0 else "#ef4444" for sym in tc.index]
+                    fig3 = px.bar(
+                        x=tc.index,
+                        y=tc.values,
+                        labels={"x": "Symbol", "y": "Trades"},
+                    )
+                    fig3.update_traces(marker_color=colors)
+                    st.plotly_chart(fig3, use_container_width=True)
+                else:
+                    st.info("No symbol column available in this report.")
+
+            st.markdown("### Equity Curve (Cumulative Profit)")
+            eq = result['equity_df']
+            fig_eq = px.line(eq, x="Close Time", y="Cumulative_Profit", markers=True)
+            fig_eq.update_layout(
+                xaxis_title="Time",
+                yaxis_title="Cumulative Profit",
+                height=450,
+                hovermode="x unified",
+                margin=dict(l=10, r=10, t=40, b=10),
+            )
+            st.plotly_chart(fig_eq, use_container_width=True)
+
+            # --- Copiable Client Summary ---
+            notes = []
+            if result['scalping_percentage'] >= 30:
+                notes.append("Scalping Acc.")
+            if result['reversal_count'] > 0 and result['reversal_percentage'] > 0:
+                notes.append("Performed Hedging")
+            if result['burst_count'] > 5:
+                notes.append("Performed Burst Trades")
+
+            summary = f"""Trade_Analysis_Report - {acc_id}
+
+Overall
+- Total Trades: {result['total_positions']}
+- Total Profit: ${result['total_profit']:.2f}
+
+Scalping Trades
+- Scalping Trades: {result['scalping_count']}
+- Scalping Profit: ${result['scalping_profit']:.2f}
+- Scalping % of trades: {result['scalping_percentage']:.1f}%
+- Scalping profit % of total: {result['scalping_profit_percentage']:.1f}%
+
+Reversal Trades
+- Reversal Trades: {result['reversal_count']}
+- Reversal Profit: ${result['reversal_profit']:.2f}
+- Reversal Trades % of total trades: {result['reversal_percentage']:.1f}%
+- Reversal Profit % of total profit: {result['reversal_profit_percentage']:.1f}%
+
+Burst Trades
+- Burst Trades: {result['burst_count']}
+- Burst Profit: ${result['burst_profit']:.2f}
+- Burst Trades % of total trades: {result['burst_percentage']:.1f}%
+- Burst Profit % of total: {result['burst_profit_percentage']:.1f}%
+
+{("Notes: " + ", ".join(notes)) if notes else ""}"""
+
+            st.markdown("#### Copy-ready Summary")
+            st.code(summary, language="text")
+            st.caption("You can copy the summary above and send it directly to the client.")
+
+    else:
+        st.info("Upload a trade history Excel file to begin analysis.")
+
+# ---------- TAB 2: Forex Calculator ----------
+with tab_forex:
+    st.header("Forex Calculator")
+
+    center = st.columns([1, 3, 1])[1]
+    with center:
+        calc_type = st.selectbox(
+            "Calculation Type",
+            ["Pip Difference", "Margin Calculator", "Pip Value & Spread Cost", "Swap Calculator"]
         )
 
         st.divider()
 
-        # --- Pip Difference Section ---
-        if calculation_type == 'Pip Difference':
+        if calc_type == "Pip Difference":
             st.subheader("Pip Difference")
-            col1, col2 = st.columns(2)
-            with col1:
-                pip_pair = st.text_input("Pair (e.g. EURUSD)", value="EURUSD", key="pip_pair").upper()
-            with col2:
-                pip_open = st.number_input("Opening Price", format="%.6f", key="pip_open")
-            pip_close = st.number_input("Closing Price", format="%.6f", key="pip_close")
+            c1, c2 = st.columns(2)
+            with c1:
+                pair = st.text_input("Pair (e.g., EURUSD)", value="EURUSD").upper()
+            with c2:
+                open_price = st.number_input("Opening Price", format="%.6f")
+            close_price = st.number_input("Closing Price", format="%.6f")
 
-            pip_result = st.empty()
-            if pip_open > 0 and pip_close > 0 and len(pip_pair) == 6:
-                pip = detect_pip_size(pip_pair)
-                pips = abs((pip_close - pip_open) / pip)
-                pip_result.success(f"Pip Difference: {pips:.2f} pips (pip size {pip})")
+            placeholder = st.empty()
+            if open_price > 0 and close_price > 0 and len(pair) == 6:
+                pip = detect_pip_size(pair)
+                pips = abs((close_price - open_price) / pip)
+                placeholder.success(f"Pip Difference: {pips:.2f} pips (pip size {pip})")
             else:
-                pip_result.warning("⚠️ Enter valid inputs (pair must be 6 chars and prices > 0)")
-            st.caption("Note: JPY pairs use pip = 0.01; others use 0.0001. Metals/Indices/Cryptos adjusted.")
+                placeholder.warning("Enter valid pair (6 letters) and positive prices.")
 
-        # --- Margin Calculator & Pip Value Section ---
-        elif calculation_type == 'Margin Calculator' or calculation_type == 'Pip Value & Spread Cost':
-
-            if calculation_type == 'Margin Calculator':
-                st.subheader("Forex Margin Calculator")
+        elif calc_type in ["Margin Calculator", "Pip Value & Spread Cost"]:
+            if calc_type == "Margin Calculator":
+                st.subheader("Margin Calculator")
             else:
-                st.subheader("Pip Value & Spread Cost Calculator")
+                st.subheader("Pip Value & Spread Cost")
 
-            col1, col2 = st.columns(2)
-            with col1:
-                pair = st.text_input("Pair (BASEQUOTE, e.g. AUDCAD)", value="AUDCAD", key="margin_pair").upper()
-            with col2:
-                lot_type = st.selectbox("Lot Type", ['standard', 'mini', 'micro', 'custom'], key="margin_lot_type")
+            c1, c2 = st.columns(2)
+            with c1:
+                pair = st.text_input("Pair (BASEQUOTE)", value="AUDCAD").upper()
+            with c2:
+                lot_type = st.selectbox("Lot Type", ["standard", "mini", "micro", "custom"])
 
             custom_lot = None
-            if lot_type == 'custom':
-                custom_lot = st.number_input("Custom Lot Size", min_value=1.0, step=1.0, key="margin_custom")
+            if lot_type == "custom":
+                custom_lot = st.number_input("Custom Contract Size", min_value=1.0, step=1.0)
 
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                lots = st.number_input("Lots", value=1.0, min_value=0.01, step=0.01, key="margin_lots")
-            with col2:
-                price = st.number_input("Current Market Price", format="%.6f", key="margin_price")
-            with col3:
-                leverage = st.number_input("Leverage (e.g., 100 for 1:100)", value=100, min_value=1, step=1,
-                                           key="margin_leverage")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                lots = st.number_input("Lots", min_value=0.01, value=1.0, step=0.01)
+            with c2:
+                price = st.number_input("Current Market Price", format="%.6f")
+            with c3:
+                leverage = st.number_input("Leverage (e.g., 100 for 1:100)", min_value=1, value=100, step=1)
 
-            cross_rate = st.number_input("Cross Rate (USD/Quote)", min_value=0.0, format="%.6f",
-                                         key="margin_cross",
-                                         help="If QUOTE is not USD, enter USD/QUOTE rate (e.g., USDGBP rate for EURGBP)")
+            cross_rate = st.number_input(
+                "Cross Rate (USD/Quote)",
+                min_value=0.0,
+                format="%.6f",
+                help="If QUOTE is not USD, enter USD/QUOTE rate."
+            )
 
-            if calculation_type == 'Margin Calculator':
-                equity = st.number_input("Account Equity (USD)", value=1000.0, min_value=0.01, step=0.01,
-                                         key="margin_equity")
+            if calc_type == "Margin Calculator":
+                equity = st.number_input("Account Equity (USD)", min_value=0.0, value=1000.0)
 
-            # Calculation Logic (Unified)
             base = pair[:3]
             quote = pair[3:]
             contract = contract_size(lot_type, custom_lot)
-            calculated_margin_usd = 0.0
+
+            margin_usd = 0.0
             margin_quote = 0.0
+            formula_text = ""
 
             if len(pair) == 6 and lots > 0 and price > 0 and leverage > 0 and contract > 0:
-
-                if quote == 'USD':
+                if quote == "USD":
                     margin_usd = (lots * contract * price) / leverage
                     margin_quote = margin_usd / price
-                    formula_text = '((lots * contract * price) / leverage)'
-                    calculated_margin_usd = margin_usd
-
-                elif base == 'USD':
+                    formula_text = "((lots * contract * price) / leverage)"
+                elif base == "USD":
                     margin_quote = (lots * contract) / leverage
                     margin_usd = margin_quote * price
-                    formula_text = '((lots * contract) / leverage) * price'
-                    calculated_margin_usd = margin_usd
-
-                else:  # Non-USD pair
+                    formula_text = "((lots * contract) / leverage) * price"
+                else:
                     margin_quote = (lots * contract * price) / leverage
                     if cross_rate > 0:
                         margin_usd = margin_quote / cross_rate
-                        formula_text = '((lots * contract * price) / leverage) / crossRate'
-                        calculated_margin_usd = margin_usd
+                        formula_text = "((lots * contract * price) / leverage) / crossRate"
                     else:
-                        formula_text = "Error: Cross Rate Missing"
+                        formula_text = "Missing cross rate for non-USD pair."
 
-            if calculation_type == 'Margin Calculator':
-                st.subheader("Margin Results")
-                if calculated_margin_usd > 0:
+            if calc_type == "Margin Calculator":
+                st.subheader("Margin Result")
+                if margin_usd > 0:
                     st.info(f"Formula (USD): {formula_text}")
-                    st.metric(f"Margin ({quote})", f"{margin_quote:.6f} {quote}")
-                    st.metric("Blocked Margin (USD)", f"${calculated_margin_usd:.6f}")
-
-                    if equity > 0 and calculated_margin_usd > 0:
-                        margin_level = (equity / calculated_margin_usd) * 100
-                        st.metric("Margin Level %", f"{margin_level:.2f}%")
-                    else:
-                        st.warning("⚠️ Enter valid equity/margin for Margin Level.")
+                    st.metric(f"Margin ({quote})", f"{margin_quote:.4f} {quote}")
+                    st.metric("Blocked Margin (USD)", f"${margin_usd:.2f}")
+                    if equity > 0 and margin_usd > 0:
+                        ml = (equity / margin_usd) * 100
+                        st.metric("Margin Level %", f"{ml:.2f}%")
                 else:
-                    st.warning("⚠️ Enter valid inputs (pair, lots, price, leverage, and cross rate if needed).")
+                    st.warning("Provide valid pair, price, leverage, lots and cross rate (if needed).")
 
-            # --- Pip Value & Spread Cost Results ---
-            if calculation_type == 'Pip Value & Spread Cost':
-                st.subheader("Pip Value & Spread Cost Results")
-                spread = st.number_input("Spread (in pips)", value=1.0, min_value=0.0, step=0.1)
+            if calc_type == "Pip Value & Spread Cost":
+                st.subheader("Pip Value & Spread Cost")
+                spread = st.number_input("Spread (in pips)", min_value=0.0, value=1.0, step=0.1)
 
                 if price > 0 and lots > 0 and contract > 0:
                     pip = detect_pip_size(pair)
 
-                    if quote == 'USD':
+                    if quote == "USD":
                         pip_value_unit = contract * pip
-                    elif base == 'USD':
+                    elif base == "USD":
                         pip_value_unit = (contract * pip) / price
                     else:
                         if cross_rate > 0:
@@ -513,242 +831,221 @@ with tab1:
 
                     if pip_value_usd > 0:
                         st.success(
-                            f"Pip Value (per {lots} lots): **${pip_value_usd:.2f}** | Spread Cost (per trade): **${spread_cost:.2f}**")
+                            f"Pip Value for {lots} lot(s): ${pip_value_usd:.2f} | "
+                            f"Spread Cost per trade: ${spread_cost:.2f}"
+                        )
                     else:
-                        st.info("Pip Value: **Cannot calculate** (Check Cross Rate or inputs)")
+                        st.warning("Cannot compute pip value — check cross rate or inputs.")
                 else:
-                    st.info("Enter valid price, lots, and lot info to calculate.")
+                    st.warning("Enter valid price, lots, and contract parameters.")
 
+        elif calc_type == "Swap Calculator":
+            st.subheader("Swap Calculator")
 
-        # --- Swap Calculator Section ---
-        elif calculation_type == 'Swap Calculator':
-            st.subheader("Forex Swap Calculator")
+            c1, c2 = st.columns(2)
+            with c1:
+                pair = st.text_input("Pair (e.g., EURUSD)", value="EURUSD").upper()
+                trade_type = st.radio("Trade Type", ["Buy", "Sell"])
+            with c2:
+                lots = st.number_input("Lots", min_value=0.01, value=1.0, step=0.01)
+                days = st.number_input("Days Held", min_value=1, value=1, step=1)
 
-            col1, col2 = st.columns(2)
-            with col1:
-                swap_pair = st.text_input("Pair (e.g. EURUSD)", value="EURUSD", key="swap_pair").upper()
-                swap_type = st.radio("Trade Type", options=["Buy", "Sell"], key="swap_trade_type")
-            with col2:
-                swap_lots = st.number_input("Lots", value=1.0, min_value=0.01, step=0.01, key="swap_lots")
-                swap_days = st.number_input("Number of Nights/Days Held", value=1, min_value=1, step=1, key="swap_days")
+            c3, c4, c5 = st.columns(3)
+            with c3:
+                swap_rate = st.number_input(
+                    f"Swap Rate ({trade_type})",
+                    value=-7.5,
+                    help="Swap rate per lot from broker (may be positive or negative)."
+                )
+            with c4:
+                price = st.number_input("Current Market Price", value=1.10000, format="%.6f")
+            with c5:
+                cross_rate = st.number_input(
+                    "Cross Rate (USD/Quote)",
+                    min_value=0.0,
+                    value=1.0,
+                    format="%.6f",
+                    help="If QUOTE is not USD, enter USD/QUOTE rate."
+                )
 
-            col3, col4, col5 = st.columns(3)
-            with col3:
-                swap_rate = st.number_input(f"Swap Rate ({swap_type})", value=-7.5,
-                                            help="Enter the swap rate given by your broker (can be positive or negative).",
-                                            key="swap_rate")
-            with col4:
-                swap_price = st.number_input("Current Market Price", format="%.6f", value=1.10000, key="swap_price")
-            with col5:
-                swap_cross_rate = st.number_input("Cross Rate (USD/Quote)", min_value=0.0, format="%.6f", value=1.0,
-                                                  key="swap_cross", help="If QUOTE is not USD, enter USD/QUOTE rate.")
+            lot_sel = st.selectbox("Lot Type", ["standard", "mini", "micro"])
+            contract = contract_size(lot_sel, None)
 
-            swap_contract = contract_size(
-                st.selectbox("Lot Type", ['standard', 'mini', 'micro'], key="swap_lot_type_sel"), None)
+            if lots > 0 and contract > 0 and price > 0:
+                base = pair[:3]
+                quote = pair[3:]
 
-            if swap_lots > 0 and swap_contract > 0 and swap_price > 0:
+                total_swap_quote = swap_rate * lots * days
 
-                base = swap_pair[:3]
-                quote = swap_pair[3:]
-
-                total_swap_value_quote = swap_rate * swap_lots * swap_days
-
-                if quote == 'USD':
-                    final_swap_usd = total_swap_value_quote
-                    swap_currency = 'USD'
-                elif swap_cross_rate > 0:
-                    final_swap_usd = total_swap_value_quote / swap_cross_rate
-                    swap_currency = quote
+                if quote == "USD":
+                    final_swap_usd = total_swap_quote
+                elif cross_rate > 0:
+                    final_swap_usd = total_swap_quote / cross_rate
                 else:
-                    st.warning("⚠️ Enter a valid USD/Quote Cross Rate to calculate swap in USD.")
-                    st.stop()
+                    st.warning("Enter cross rate to convert swap into USD.")
+                    final_swap_usd = 0
 
-                st.success(f"Estimated Total Swap ({swap_days} days): **${final_swap_usd:.2f}**")
-                st.info(
-                    f"Swap calculated based on: **Swap Rate per Lot ({swap_rate})** * **Lots ({swap_lots})** * **Days ({swap_days})** converted from {swap_currency} to USD.")
-
+                if final_swap_usd != 0:
+                    st.success(f"Estimated Swap over {days} day(s): ${final_swap_usd:.2f}")
+                    st.caption(
+                        f"Computed as Swap Rate per Lot ({swap_rate}) × Lots ({lots}) × Days ({days}), "
+                        "converted to USD."
+                    )
             else:
-                st.warning("⚠️ Enter valid inputs (Pair, Lots, Lot Type, Price).")
+                st.warning("Enter valid pair, lots, lot type, and price.")
 
-# ===========================================================
-# 🔹 TAB 2: TRADE & SECURITY ANALYZER (FIXED)
-# ===========================================================
-with tab2:
-    st.header("📊 TRADE & SECURITY ANALYZER")
+# ---------- TAB 3: IP & Security ----------
+with tab_ip:
+    st.header("Trade Security & IP Intelligence")
 
-    st.subheader("1. File Upload & Account Details")
+    # --- Section 1: Trade + IP Security for one account ---
+    st.subheader("Trade & Security Analyzer (Single Account)")
 
-    col_a, col_c = st.columns(2)
-
-    with col_a:
-        uploaded_file_obj = st.file_uploader("📂 Upload Trade History Excel (.xlsx)", type=["xlsx"])
-
-    with col_c:
+    col_file, col_country = st.columns(2)
+    with col_file:
+        sec_file = st.file_uploader(
+            "Trade History Excel (.xlsx)",
+            type=["xlsx"],
+            key="trade_file_security"
+        )
+    with col_country:
         account_country = st.text_input("Registered Account Country", value="United Arab Emirates")
 
-    st.markdown(f"**Extracted Account ID:** `**{st.session_state.extracted_account_id}**`")
+    st.markdown(f"**Last Extracted Account ID:** `{st.session_state.extracted_account_id}`")
 
-    st.divider()
+    col_ip, col_vps = st.columns(2)
+    with col_ip:
+        trade_ip = st.text_input(
+            "Last Trading IP",
+            value="103.1.200.1",
+            help="Use a sample IP to test lookup."
+        )
+    with col_vps:
+        vps_used = st.selectbox("VPS Used?", ["No", "Yes"])
 
-    st.subheader("2. Trading Location & Security Check")
-    col_d, col_e = st.columns(2)
-
-    with col_d:
-        trade_ip = st.text_input("Last Trading IP Address", value="103.1.200.1",
-                                 help="Use a test IP like 103.1.200.1 (India) or 203.0.113.1 (Test IP) to see results.")
-
-    with col_e:
-        vps_used = st.selectbox("Was VPS used?", options=['No', 'Yes'])
-
-    # Button to start analysis
-    if st.button("🚀 Run Comprehensive Analysis"):
-
-        # 1. Trade Analysis
-        if uploaded_file_obj is None:
-            st.error("Please upload the Trade History Excel file.")
-            st.stop()
-
-        file_name = uploaded_file_obj.name
-
-        with st.spinner(f"Analyzing trading history and extracting Account ID (File: {file_name})..."):
-            analysis_result = analyze_trades(uploaded_file_obj, file_name=file_name)
-
-        # --- Handle Account ID Extraction ---
-        extracted_account_id = analysis_result.get("extracted_account_id")
-
-        if not extracted_account_id:
-            st.error(
-                "❌ Could not automatically extract Account ID from the file content or file name. Please check the file format.")
-            account_id_to_use = "Unknown Account ID"
+    if st.button("Run Trade + IP Security Check"):
+        if sec_file is None:
+            st.error("Please upload a trade history file first.")
         else:
-            st.session_state.extracted_account_id = extracted_account_id
-            account_id_to_use = extracted_account_id
+            with st.spinner("Analyzing trade patterns..."):
+                analysis = analyze_trades(sec_file, scalping_limit=3, file_name=sec_file.name)
 
-            # **FIXED LOGIC**: Safely check for error key and evaluate success source
-            file_name_match = re.search(r'ReportHistory[-_](\d+)', file_name, re.IGNORECASE)
-            error_message = analysis_result.get('error')
+            acc = analysis.get("extracted_account_id") or st.session_state.extracted_account_id or "Unknown"
+            st.session_state.extracted_account_id = acc
 
-            # The file name ID was used if:
-            # 1. We found a match in the file name, AND
-            # 2. The error message indicates that the content-based extraction failed (i.e., couldn't find 'Account:')
-            if file_name_match and (error_message and 'Account:' in error_message):
-                st.success(f"✅ Extracted Account ID: **{account_id_to_use}** (Found via **File Name Fallback**)")
+            if analysis.get("error"):
+                st.error(analysis["error"])
             else:
-                st.success(f"✅ Extracted Account ID: **{account_id_to_use}** (Found via File Content)")
+                st.success(f"Trade analysis completed for Account {acc}.")
 
-        # --- Handle General Analysis Error ---
-        # Safely use .get('error') here as well
-        if analysis_result.get("error") and analysis_result["error"] != "No valid timestamps found for analysis.":
-            st.error(f"Trade Analysis Failed: {analysis_result['error']}")
-            # Continue execution here only if we successfully extracted the ID and want to proceed with IP check
-            if not extracted_account_id:
-                st.stop()
+            with st.spinner(f"Looking up IP {trade_ip}..."):
+                ip_info = get_ip_details(trade_ip)
 
-        if analysis_result['total_positions'] == 0:
-            st.warning("No valid closed positions were found for analysis.")
+            if "error" in ip_info:
+                st.warning(f"IP lookup issue for {trade_ip}: {ip_info['error']}")
+                ip_info = {"city": "N/A", "country": "N/A"}
 
-        # Only show success if no critical error prevented the whole analysis
-        if not analysis_result.get("error"):
-            st.success("Trade Analysis Complete!")
+            add_ip_to_history(trade_ip, ip_info)
 
-        # 2. IP Lookup
-        with st.spinner(f"Looking up IP: {trade_ip}..."):
-            trade_ip_details = get_ip_details(trade_ip)
+            if not analysis.get("error") and analysis.get("total_positions", 0) > 0:
+                st.subheader("Security Summary")
+                report = generate_security_report(
+                    analysis=analysis,
+                    account_id=acc,
+                    trade_ip=ip_info,
+                    account_country=account_country,
+                    vps_used=vps_used
+                )
+                st.code(report, language="text")
 
-        if "error" in trade_ip_details:
-            st.warning(f"IP Lookup Warning for {trade_ip}: {trade_ip_details['error']}. Using N/A for report.")
-            trade_ip_details = {"full_country": "N/A", "city": "N/A", "country": "N/A"}
-            ip_display_country = "N/A"
-        else:
-            ip_display_country = trade_ip_details.get('full_country', trade_ip_details.get('country', 'N/A'))
-            st.success(f"IP Lookup Complete: Located in {trade_ip_details.get('city', 'N/A')}, {ip_display_country}")
+                # quick risk snapshot
+                total_pos = analysis["total_positions"]
+                total_profit = analysis["total_profit"]
+                wins = analysis["all_positions_df"][analysis["all_positions_df"]["Profit"] > 0].shape[0]
+                win_rate = (wins / total_pos * 100) if total_pos else 0
 
-        # Log to history for display later
-        st.session_state.ip_history.append({
-            "ip": trade_ip,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "details": trade_ip_details
-        })
+                r1, r2, r3 = st.columns(3)
+                with r1:
+                    st.metric("Total Trades", total_pos)
+                with r2:
+                    st.metric("Total Profit", f"${total_profit:.2f}")
+                with r3:
+                    st.metric("Win Rate", f"{win_rate:.1f}%")
+            else:
+                st.info("No valid trades, so detailed security report could not be produced.")
 
-        st.divider()
-        st.subheader("3. Copiable Report and Visuals")
+    st.markdown("---")
 
-        # --- Generate and Display Copiable Report ---
-        if extracted_account_id and analysis_result['total_positions'] > 0:
-            report_text = generate_report(
-                analysis_result=analysis_result,
-                account_id=account_id_to_use,
-                trade_ip_details=trade_ip_details,
-                account_country=account_country,
-                vps_used=vps_used
-            )
+    # --- Section 2: Bulk IP Lookup with cards ---
+    st.subheader("Bulk IP Lookup")
 
-            st.markdown("**Copiable Report:**")
-            st.code(report_text, language='text')
+    ip_text = st.text_area(
+        "IP addresses (comma or newline separated)",
+        placeholder="8.8.8.8, 1.1.1.1\n203.0.113.1",
+        height=100
+    )
+    lookup_btn = st.button("Lookup IPs")
 
-        # --- Display Visuals and Details ---
+    if lookup_btn and ip_text.strip():
+        ip_list = [x.strip() for x in ip_text.replace("\n", ",").split(",") if x.strip()]
+        st.info(f"Looking up {len(ip_list)} IP(s)...")
+        for ip in ip_list:
+            with st.spinner(f"Looking up {ip}..."):
+                info = get_ip_details(ip)
+                add_ip_to_history(ip, info)
 
-        if analysis_result['total_positions'] > 0:
-            st.subheader("Trade Summary")
-            col_s1, col_s2, col_s3, col_s4 = st.columns(4)
-            col_s1.metric("Total Positions", analysis_result['total_positions'])
-            col_s2.metric("Total Profit", f"${analysis_result['total_profit']:.2f}")
-
-            win_count = analysis_result['all_positions_df'][analysis_result['all_positions_df']['Profit'] > 0].shape[0]
-            total_trades = analysis_result['total_positions']
-            win_rate = (win_count / total_trades * 100) if total_trades > 0 else 0
-
-            col_s3.metric("Win Rate", f"{win_rate:.1f}%")
-            col_s4.metric("Avg Hold Time", str(analysis_result['avg_hold_time']).split('.')[0])
-
-            st.divider()
-
-            st.subheader("High-Risk Trade Patterns")
-
-            scalping_style = "background-color: #f63366; color: white; font-weight: bold;" if analysis_result[
-                                                                                                  'scalping_percentage'] >= 30 else ""
-
-            summary_data = {
-                'Trade Type': ['Scalping (< 3 min)', 'Reversal (< 20 sec)', 'Burst (< 2 sec)'],
-                'Count': [analysis_result['scalping_count'], analysis_result['reversal_count'],
-                          analysis_result['burst_count']],
-                'Count %': [f"{analysis_result['scalping_percentage']:.1f}%",
-                            f"{analysis_result['reversal_percentage']:.1f}%",
-                            f"{analysis_result['burst_percentage']:.1f}%"],
-                'Profit': [f"${analysis_result['scalping_profit']:.2f}", f"${analysis_result['reversal_profit']:.2f}",
-                           f"${analysis_result['burst_profit']:.2f}"],
-            }
-            summary_df = pd.DataFrame(summary_data)
-
-
-            def highlight_scalping(s):
-                is_scalping_row = s['Trade Type'] == 'Scalping (< 3 min)'
-                is_toxic = analysis_result['scalping_percentage'] >= 30
-                return [scalping_style] * len(s) if is_scalping_row and is_toxic else [''] * len(s)
-
-
-            st.dataframe(
-                summary_df.style.apply(highlight_scalping, axis=1),
-                hide_index=True
-            )
-
-            st.caption(f"Average Scalping Hold Time: {str(analysis_result['avg_scalping_hold_time']).split('.')[0]}")
-
-            df_plot = analysis_result['all_positions_df'].copy()
-            df_plot['Cumulative Profit'] = df_plot['Profit'].cumsum()
-            fig_cum = px.line(df_plot, x='Close Time', y='Cumulative Profit',
-                              title="Cumulative Profit Curve (Equity Growth)",
-                              line_shape='spline')
-            st.plotly_chart(fig_cum, use_container_width=True)
-        else:
-            st.info("No trading summary or visuals generated because no valid trades were found in the file.")
-
-    st.divider()
-    st.subheader("Recent IP Lookups")
     if st.session_state.ip_history:
-        for entry in st.session_state.ip_history:
-            display_country = entry['details'].get('full_country', entry['details'].get('country', 'N/A'))
-            st.write(
-                f"**{entry['timestamp']}** — {entry['ip']} → {entry['details'].get('city', 'N/A')}, **{display_country}**")
+        st.subheader("Recent IP Lookups")
+        per_row = 3
+        entries = st.session_state.ip_history
+
+        for i in range(0, len(entries), per_row):
+            row = st.columns(per_row)
+            for j, entry in enumerate(entries[i:i+per_row]):
+                with row[j]:
+                    details = entry["details"]
+                    if "error" in details:
+                        st.error(f"{entry['ip']}: {details['error']}")
+                        continue
+
+                    city = details.get("city", "N/A")
+                    region = details.get("region", "N/A")
+                    country = details.get("country", "N/A")
+                    org = details.get("org", "N/A")
+                    loc = details.get("loc")
+                    tz = details.get("timezone", "N/A")
+
+                    st.markdown(
+                        f"""
+                        <div class="ip-card">
+                          <strong>{entry['ip']}</strong><br/>
+                          <span>{city}, {region}, {country}</span><br/><br/>
+                          <span><b>ISP:</b> {org}</span><br/>
+                          <span><b>Timezone:</b> {tz}</span><br/>
+                          <span><b>Coords:</b> {loc if loc else "N/A"}</span><br/>
+                          <span style="font-size:0.75rem; color:#6b7280;">⏱ {entry['timestamp']}</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+                    if loc:
+                        try:
+                            lat, lon = map(float, loc.split(","))
+                            st.map(
+                                pd.DataFrame({"lat": [lat], "lon": [lon]}),
+                                use_container_width=True,
+                                height=160,
+                            )
+                        except Exception:
+                            pass
+
+        c = st.columns([1, 4, 1])[1]
+        with c:
+            if st.button("Clear IP History", use_container_width=True):
+                st.session_state.ip_history = []
+                st.experimental_rerun()
     else:
-        st.info("No IP lookups yet.")
+        st.info("No IP lookups yet — run a lookup above to see results.")
+
+st.markdown("Built with ❤ using Streamlit • Rotex • EagleEye")
